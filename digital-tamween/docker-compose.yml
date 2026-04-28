@@ -1,0 +1,126 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: tamween_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: tamween_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d tamween_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: tamween_redis
+    ports:
+      - "6379:6379"
+
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "9090:8080"
+      - "7077:7077"
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: spark-worker
+    environment:
+      - SPARK_MODE=worker
+    depends_on:
+      - spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+
+  # ✅ pgAdmin - DB GUI
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: tamween_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@tamween.com   # ← بريدك لتسجيل الدخول
+      PGADMIN_DEFAULT_PASSWORD: admin            # ← كلمة المرور
+    ports:
+      - "5050:80"                                # ← افتح http://localhost:5050
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  airflow-init:
+    image: apache/airflow:2.7.0
+    container_name: airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    user: "0:0"
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres:5432/tamween_db
+      - AIRFLOW__CORE__FERNET_KEY=1KClfuaxY_nFkyyp4WfKFFgxjVba0rwvKdfLFZuqolw=
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Mustafa \
+          --lastname Lead \
+          --role Admin \
+          --email admin@example.com || true
+
+  airflow-webserver:
+    image: apache/airflow:2.7.0
+    container_name: airflow-webserver
+    user: "0:0"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres:5432/tamween_db
+      - AIRFLOW__CORE__FERNET_KEY=1KClfuaxY_nFkyyp4WfKFFgxjVba0rwvKdfLFZuqolw=
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=secret_key_for_tamween
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./big-data/dags:/opt/airflow/dags
+      - ./big-data/logs:/opt/airflow/logs
+    command: ["webserver"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  airflow-scheduler:
+    image: apache/airflow:2.7.0
+    container_name: airflow-scheduler
+    user: "0:0"
+    depends_on:
+      airflow-webserver:
+        condition: service_started
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres:5432/tamween_db
+      - AIRFLOW__CORE__FERNET_KEY=1KClfuaxY_nFkyyp4WfKFFgxjVba0rwvKdfLFZuqolw=
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=secret_key_for_tamween
+    volumes:
+      - ./big-data/dags:/opt/airflow/dags
+      - ./big-data/logs:/opt/airflow/logs
+    command: ["scheduler"]
+
+volumes:
+  postgres_data:
