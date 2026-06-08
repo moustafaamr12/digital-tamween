@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -10,4 +5,226 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  OUTLET_OWNER
+  ADMIN
+}
+
+enum PurchaseType {
+  ONSITE
+  DELIVERY
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+// ─── Users (المواطنون) ────────────────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  nationalId    String   @unique
+  tamweenCardId String   @unique
+  phone         String?
+  address       String?
+  passwordHash  String
+  cardPin       String   @default("0000") @map("cardpin")
+  monthlyCredit Float    @default(200)
+  usedCredit    Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  purchases      Purchase[]
+  deliveryOrders DeliveryOrder[]
+  messages       Message[]
+
+  @@map("users")
+}
+
+// ─── Messages (رسائل OTP) ─────────────────────────────────────────────────────
+
+model Message {
+  id        String   @id @default(cuid())
+  userId    String   @map("userid")
+  content   String
+  otp       String?
+  isRead    Boolean  @default(false) @map("isread")
+  createdAt DateTime @default(now()) @map("createdat")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("messages")
+}
+
+// ─── Admins (مسئولو الوزارة) ─────────────────────────────────────────────────
+
+model Admin {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  @@map("admins")
+}
+
+// ─── Outlets (المنافذ) ────────────────────────────────────────────────────────
+
+model Outlet {
+  id        String   @id @default(cuid())
+  name      String
+  address   String
+  latitude  Float
+  longitude Float
+  licenseNo String   @unique
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner    OutletOwner?
+  products OutletProduct[]
+  purchases Purchase[]
+  restocks  RestockOperation[]
+
+  @@map("outlets")
+}
+
+// ─── Outlet Owners (أصحاب المنافذ) ───────────────────────────────────────────
+
+model OutletOwner {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String?
+  passwordHash String
+  outletId     String   @unique
+  createdAt    DateTime @default(now())
+
+  outlet Outlet @relation(fields: [outletId], references: [id])
+
+  @@map("outlet_owners")
+}
+
+// ─── Products (المنتجات) ──────────────────────────────────────────────────────
+
+model Product {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  unit     String
+  category String?
+
+  outletProducts OutletProduct[]
+  purchaseItems  PurchaseItem[]
+  restockItems   RestockItem[]
+
+  @@map("products")
+}
+
+// ─── Outlet Inventory (مخزون المنفذ) ─────────────────────────────────────────
+
+model OutletProduct {
+  id           String   @id @default(cuid())
+  outletId     String
+  productId    String
+  quantity     Float
+  minThreshold Float    @default(10)
+  pricePerUnit Float
+  updatedAt    DateTime @updatedAt
+
+  outlet  Outlet  @relation(fields: [outletId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([outletId, productId])
+  @@map("outlet_products")
+}
+
+// ─── Purchases (عمليات الشراء) ────────────────────────────────────────────────
+
+model Purchase {
+  id          String       @id @default(cuid())
+  userId      String
+  outletId    String
+  type        PurchaseType
+  totalAmount Float
+  status      OrderStatus  @default(CONFIRMED)
+  createdAt   DateTime     @default(now())
+
+  user     User           @relation(fields: [userId], references: [id])
+  outlet   Outlet         @relation(fields: [outletId], references: [id])
+  items    PurchaseItem[]
+  delivery DeliveryOrder?
+
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id         String @id @default(cuid())
+  purchaseId String
+  productId  String
+  quantity   Float
+  unitPrice  Float
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+
+  @@map("purchase_items")
+}
+
+// ─── Delivery Orders (طلبات التوصيل) ─────────────────────────────────────────
+
+model DeliveryOrder {
+  id          String      @id @default(cuid())
+  purchaseId  String      @unique
+  userId      String
+  address     String
+  latitude    Float?
+  longitude   Float?
+  status             OrderStatus @default(PENDING)
+  deliveryFee        Float       @default(5)
+  extraPaymentMethod String?     @map("extra_payment_method")
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@map("delivery_orders")
+}
+
+// ─── Restock Operations (عمليات شحن البضاعة) ─────────────────────────────────
+
+model RestockOperation {
+  id        String   @id @default(cuid())
+  outletId  String
+  note      String?
+  createdAt DateTime @default(now())
+
+  outlet Outlet        @relation(fields: [outletId], references: [id])
+  items  RestockItem[]
+
+  @@map("restock_operations")
+}
+
+model RestockItem {
+  id        String @id @default(cuid())
+  restockId String
+  productId String
+  quantity  Float
+  weightKg  Float?
+
+  restock RestockOperation @relation(fields: [restockId], references: [id])
+  product Product          @relation(fields: [productId], references: [id])
+
+  @@map("restock_items")
 }
