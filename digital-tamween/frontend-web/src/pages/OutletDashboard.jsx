@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/axios'
 import { io } from 'socket.io-client'
+import { QRCodeSVG } from 'qrcode.react'
 
-const TABS = ['inventory', 'pos', 'deliveries', 'sales', 'restocks']
-const TAB_LABELS = { inventory: 'المخزون', pos: 'نقطة البيع', deliveries: 'طلبات التوصيل', sales: 'المبيعات', restocks: 'الشحن' }
+const TABS = ['inventory', 'pos', 'deliveries', 'sales', 'messages']
+const TAB_LABELS = { inventory: 'المخزون', pos: 'نقطة البيع', deliveries: 'طلبات التوصيل', sales: 'المبيعات', messages: 'الرسائل' }
 
 const STATUS_LABELS = { PENDING: 'تم الارسال', CONFIRMED: 'قيد التحضير', OUT_FOR_DELIVERY: 'في الطريق', DELIVERED: 'تم التسليم', CANCELLED: 'ملغي' }
 const STATUS_COLORS = { PENDING: 'bg-yellow-100 text-yellow-700', CONFIRMED: 'bg-blue-100 text-blue-700', OUT_FOR_DELIVERY: 'bg-purple-100 text-purple-700', DELIVERED: 'bg-green-100 text-green-700', CANCELLED: 'bg-red-100 text-red-700' }
@@ -22,11 +23,26 @@ export default function OutletDashboard() {
   const [notifications, setNotifications] = useState([])
 
   // POS shared
-  const [posMethod, setPosMethod] = useState('otp') // 'otp' | 'card'
+  const [posMainMode, setPosMainMode] = useState(null) // null | 'tamween' | 'guest'
+  const [posMethod, setPosMethod] = useState('otp')    // 'otp' | 'card'  (within tamween)
   const [posUser, setPosUser] = useState(null)
+  const [posPaymentMode, setPosPaymentMode] = useState(null) // null | 'balance' | 'no-balance'
   const [posCart, setPosCart] = useState([])
   const [posMsg, setPosMsg] = useState('')
   const [posLoading, setPosLoading] = useState(false)
+
+  // OTP confirmation (purchase summary OTP — OTP method only)
+  const [posConfirmOtpSent, setPosConfirmOtpSent] = useState(false)
+  const [posConfirmOtp, setPosConfirmOtp] = useState('')
+  const [posConfirmLoading, setPosConfirmLoading] = useState(false)
+  const [posConfirmError, setPosConfirmError] = useState('')
+
+  // POS bank card (for no-balance payments)
+  const [posCardInserted, setPosCardInserted] = useState(false)
+  const [posCardPin, setPosCardPin] = useState('')
+  const [posCardError, setPosCardError] = useState('')
+  const [posCardPaid, setPosCardPaid] = useState(false)
+  const [posCardLoading, setPosCardLoading] = useState(false)
 
   // OTP method
   const [nationalId, setNationalId] = useState('')
@@ -34,6 +50,7 @@ export default function OutletDashboard() {
   const [otpValue, setOtpValue] = useState('')
   const [otpLoading, setOtpLoading] = useState(false)
   const [otpError, setOtpError] = useState('')
+  const [otpDisplay, setOtpDisplay] = useState('')
 
   // Card method
   const [cardInserted, setCardInserted] = useState(false)
@@ -44,6 +61,7 @@ export default function OutletDashboard() {
   const [restockNote, setRestockNote] = useState('')
   const [restockItems, setRestockItems] = useState([])
   const [restockMsg, setRestockMsg] = useState('')
+  const [outletMessages, setOutletMessages] = useState([])
 
   // Delivery management
   const [deliveries, setDeliveries] = useState([])
@@ -75,6 +93,12 @@ export default function OutletDashboard() {
     })
     socket.on('purchase-recorded', ({ userName, totalAmount }) => {
       setNotifications(prev => [`✅ بيع: ${userName} - ${totalAmount} جنيه`, ...prev.slice(0, 4)])
+    })
+
+    socket.on('qr-authenticated', (citizenData) => {
+      setPosUser(citizenData)
+      setNationalId(citizenData.nationalId)
+      setNotifications(prev => [`📷 QR: ${citizenData.name} سجّل هويته`, ...prev.slice(0, 4)])
     })
 
     return () => socket.disconnect()
@@ -125,34 +149,78 @@ export default function OutletDashboard() {
   }
 
   async function loadAll() {
-    const [prof, sal, rst] = await Promise.allSettled([
+    const [prof, sal, rst, msgs] = await Promise.allSettled([
       api.get('/outlet/profile'),
       api.get('/outlet/sales'),
       api.get('/outlet/restocks'),
+      api.get('/outlet/messages'),
     ])
     if (prof.status === 'fulfilled') setProfile(prof.value.data)
     if (sal.status === 'fulfilled') setSales(sal.value.data.data || [])
     if (rst.status === 'fulfilled') setRestocks(rst.value.data.data || [])
+    if (msgs.status === 'fulfilled') setOutletMessages(msgs.value.data || [])
     await loadInventory()
     await loadDeliveries()
   }
 
-  function resetPos() {
-    setPosUser(null); setPosMsg(''); setNationalId(''); setOtpSent(false)
-    setOtpValue(''); setOtpError(''); setCardInserted(false); setCardPin(''); setCardError('')
-    setPosCart(prev => prev.map(i => ({ ...i, qty: 0 })))
+  async function markRead(id) {
+    await api.patch(`/outlet/messages/${id}/read`)
+    setOutletMessages(prev => prev.map(m => m.id === id ? { ...m, isRead: true } : m))
   }
 
-  function switchMethod(m) { setPosMethod(m); resetPos() }
+  function resetPos() {
+    setPosMainMode(null); setPosMethod('otp'); setPosUser(null); setPosMsg('')
+    setNationalId(''); setOtpSent(false); setOtpValue(''); setOtpError(''); setOtpDisplay('')
+    setCardInserted(false); setCardPin(''); setCardError('')
+    setPosCart(prev => prev.map(i => ({ ...i, qty: 0 })))
+    setPosPaymentMode(null); setPosCardInserted(false); setPosCardPin(''); setPosCardError(''); setPosCardPaid(false)
+    setPosConfirmOtpSent(false); setPosConfirmOtp(''); setPosConfirmError('')
+  }
+
+  function switchSubMethod(m) {
+    setPosMethod(m); setPosUser(null); setNationalId(''); setOtpSent(false)
+    setOtpValue(''); setOtpError(''); setCardInserted(false); setCardPin(''); setCardError('')
+  }
+
+  async function sendPurchaseConfirmOtp(items) {
+    setPosConfirmLoading(true); setPosConfirmError('')
+    try {
+      const cartTotal = posCart.reduce((s, i) => s + i.price * i.qty, 0)
+      const shortfall = posPaymentMode === 'balance' ? Math.max(0, cartTotal - (posUser?.remainingCredit || 0)) : 0
+      const paymentMethod = posPaymentMode === 'balance' ? 'BALANCE' : (posCardPaid ? 'CARD' : 'CASH')
+      const shortfallMethod = shortfall > 0 ? (posCardPaid ? 'CARD' : 'CASH') : null
+      await api.post('/pos/otp/confirm-send', {
+        nationalId: nationalId.trim(),
+        items: items.map(i => ({ productId: i.productId, quantity: i.qty })),
+        paymentMethod,
+        shortfallMethod,
+      })
+      setPosConfirmOtpSent(true)
+    } catch (err) {
+      setPosConfirmError(err.response?.data?.error || 'حدث خطأ في إرسال رمز التأكيد')
+    }
+    setPosConfirmLoading(false)
+  }
 
   // OTP flow
   async function sendOtp(e) {
     e.preventDefault()
     setOtpError(''); setOtpLoading(true)
     try {
-      await api.post('/pos/otp/request', { nationalId: nationalId.trim() })
+      const { data } = await api.post('/pos/otp/request', { nationalId: nationalId.trim() })
+      setOtpDisplay(data.otp)
       setOtpSent(true)
     } catch (err) { setOtpError(err.response?.data?.error || 'حدث خطأ') }
+    setOtpLoading(false)
+  }
+
+  async function resendOtp() {
+    setOtpError(''); setOtpValue(''); setOtpLoading(true)
+    try {
+      const { data } = await api.post('/pos/otp/request', { nationalId: nationalId.trim() })
+      setOtpDisplay(data.otp)
+      setOtpError('تم إعادة إرسال OTP بنجاح ✓')
+    } catch (err) { setOtpError(err.response?.data?.error || 'حدث خطأ في إعادة الإرسال') }
     setOtpLoading(false)
   }
 
@@ -184,13 +252,42 @@ export default function OutletDashboard() {
     if (!items.length) return setPosMsg('error:اختر منتجاً واحداً على الأقل')
     setPosLoading(true); setPosMsg('')
     try {
-      const endpoint = posMethod === 'otp' ? '/pos/otp/purchase' : '/pos/card/purchase'
-      const payload = posMethod === 'otp'
-        ? { nationalId: nationalId.trim(), otp: otpValue.trim(), items: items.map(i => ({ productId: i.productId, quantity: i.qty })) }
-        : { cardPin, items: items.map(i => ({ productId: i.productId, quantity: i.qty })) }
-      const { data } = await api.post(endpoint, payload)
-      setPosMsg(`success:${data.user.name} — ${data.totalAmount} جنيه — متبقي: ${data.user.remainingCredit.toFixed(2)} جنيه`)
-      resetPos(); loadAll()
+      if (posMainMode === 'guest') {
+        const paymentMethod = posCardPaid ? 'CARD' : 'CASH'
+        const { data } = await api.post('/pos/guest/purchase', {
+          items: items.map(i => ({ productId: i.productId, quantity: i.qty })),
+          paymentMethod,
+        })
+        const payLabel = paymentMethod === 'CARD' ? 'دُفع ببطاقة بنكية' : 'دُفع كاش'
+        setPosMsg(`success:عميل غير مسجل — ${data.totalAmount} جنيه — ${payLabel}`)
+        resetPos(); loadAll()
+      } else {
+        const cartTotal = posCart.reduce((s, i) => s + i.price * i.qty, 0)
+        const shortfall = posPaymentMode === 'balance' ? Math.max(0, cartTotal - (posUser?.remainingCredit || 0)) : 0
+        const paymentMethod = posPaymentMode === 'balance' ? 'BALANCE' : (posCardPaid ? 'CARD' : 'CASH')
+        const shortfallMethod = shortfall > 0 ? (posCardPaid ? 'CARD' : 'CASH') : null
+        const endpoint = posMethod === 'otp' ? '/pos/otp/purchase'
+          : posMethod === 'qr' ? '/pos/qr-complete'
+          : '/pos/card/purchase'
+        const baseItems = items.map(i => ({ productId: i.productId, quantity: i.qty }))
+        const payload = posMethod === 'otp'
+          ? { nationalId: nationalId.trim(), otp: otpValue.trim(), confirmOtp: posConfirmOtp.trim(), items: baseItems, paymentMethod, shortfallMethod }
+          : posMethod === 'qr'
+          ? { nationalId: nationalId.trim(), confirmOtp: posConfirmOtp.trim(), items: baseItems, paymentMethod, shortfallMethod }
+          : { cardPin, items: baseItems, paymentMethod, shortfallMethod }
+        const { data } = await api.post(endpoint, payload)
+        let payLabel
+        if (paymentMethod === 'BALANCE' && data.shortfall > 0) {
+          const sfLabel = data.shortfallMethod === 'CARD' ? 'ببطاقة بنكية' : 'كاش'
+          payLabel = `${data.balanceDeducted.toFixed(2)} جنيه من الرصيد + ${data.shortfall.toFixed(2)} جنيه ${sfLabel} — متبقي: ${data.user.remainingCredit.toFixed(2)} جنيه`
+        } else if (paymentMethod === 'BALANCE') {
+          payLabel = `متبقي: ${data.user.remainingCredit.toFixed(2)} جنيه`
+        } else {
+          payLabel = paymentMethod === 'CARD' ? 'دُفع ببطاقة بنكية' : 'دُفع كاش'
+        }
+        setPosMsg(`success:${data.user.name} — ${data.totalAmount} جنيه — ${payLabel}`)
+        resetPos(); loadAll()
+      }
     } catch (err) { setPosMsg('error:' + (err.response?.data?.error || 'حدث خطأ')) }
     setPosLoading(false)
   }
@@ -304,20 +401,50 @@ export default function OutletDashboard() {
 
             {!posMsg.startsWith('success:') && (
               <>
-                {/* method selector */}
-                <div className="flex gap-2 bg-gray-100 p-1 rounded-xl">
-                  <button onClick={() => switchMethod('otp')}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${posMethod === 'otp' ? 'bg-white shadow text-green-700' : 'text-gray-500'}`}>
-                    📱 رقم قومي + OTP
-                  </button>
-                  <button onClick={() => switchMethod('card')}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${posMethod === 'card' ? 'bg-white shadow text-green-700' : 'text-gray-500'}`}>
-                    💳 دفع بالكارت
-                  </button>
-                </div>
+                {/* ── MAIN SELECTION: Tamween vs Guest ── */}
+                {posMainMode === null && (
+                  <div className="grid grid-cols-2 gap-4 py-2">
+                    <button onClick={() => setPosMainMode('tamween')}
+                      className="p-6 border-2 border-green-600 bg-green-50 rounded-2xl flex flex-col items-center gap-3 hover:bg-green-100 transition-colors text-center">
+                      <span className="text-5xl">🏛️</span>
+                      <span className="font-bold text-green-800 text-base">أفراد التموين</span>
+                      <span className="text-xs text-green-600">مسجلون في منظومة التموين</span>
+                    </button>
+                    <button onClick={() => setPosMainMode('guest')}
+                      className="p-6 border-2 border-orange-500 bg-orange-50 rounded-2xl flex flex-col items-center gap-3 hover:bg-orange-100 transition-colors text-center">
+                      <span className="text-5xl">🛒</span>
+                      <span className="font-bold text-orange-800 text-base">غير المسجلين</span>
+                      <span className="text-xs text-orange-600">دفع مباشر — كاش أو بطاقة</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* ── TAMWEEN: sub-method selector ── */}
+                {posMainMode === 'tamween' && (
+                  <div className="space-y-3">
+                    <button onClick={resetPos}
+                      className="flex items-center gap-2 text-sm text-gray-600 font-medium bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-xl transition-colors">
+                      ← رجوع للقائمة الرئيسية
+                    </button>
+                    <div className="flex gap-2 bg-gray-100 p-1 rounded-xl">
+                      <button onClick={() => switchSubMethod('otp')}
+                        className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${posMethod === 'otp' ? 'bg-white shadow text-green-700' : 'text-gray-500'}`}>
+                        📱 رقم قومي + OTP
+                      </button>
+                      <button onClick={() => switchSubMethod('card')}
+                        className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${posMethod === 'card' ? 'bg-white shadow text-green-700' : 'text-gray-500'}`}>
+                        💳 بطاقة التموين
+                      </button>
+                      <button onClick={() => switchSubMethod('qr')}
+                        className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${posMethod === 'qr' ? 'bg-white shadow text-green-700' : 'text-gray-500'}`}>
+                        📷 QR Code
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* ── OTP METHOD ── */}
-                {posMethod === 'otp' && !posUser && (
+                {posMainMode === 'tamween' && posMethod === 'otp' && !posUser && (
                   <div className="space-y-4">
                     {!otpSent ? (
                       <form onSubmit={sendOtp} className="space-y-3">
@@ -340,11 +467,15 @@ export default function OutletDashboard() {
                         <input value={otpValue} onChange={e => setOtpValue(e.target.value)}
                           placeholder="123456" maxLength={6}
                           className="w-full border rounded-xl px-4 py-3 text-center text-2xl tracking-widest font-bold focus:outline-none focus:ring-2 focus:ring-green-500" required />
-                        {otpError && <p className="text-red-600 text-sm text-center">{otpError}</p>}
+                        {otpError && (
+                          <p className={`text-sm text-center ${otpError.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>
+                            {otpError}
+                          </p>
+                        )}
                         <div className="flex gap-2">
-                          <button type="button" onClick={() => { setOtpSent(false); setOtpError('') }}
-                            className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50">
-                            إعادة الإرسال
+                          <button type="button" onClick={resendOtp} disabled={otpLoading}
+                            className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50 disabled:opacity-50">
+                            {otpLoading ? 'جاري الإرسال...' : 'إعادة الإرسال'}
                           </button>
                           <button type="submit" disabled={otpLoading}
                             className="flex-1 bg-green-700 text-white py-3 rounded-xl font-bold hover:bg-green-800 disabled:opacity-50">
@@ -357,7 +488,7 @@ export default function OutletDashboard() {
                 )}
 
                 {/* ── CARD METHOD ── */}
-                {posMethod === 'card' && !posUser && (
+                {posMainMode === 'tamween' && posMethod === 'card' && !posUser && (
                   <div className="space-y-4">
                     {!cardInserted ? (
                       <div className="flex flex-col items-center justify-center py-8 space-y-5">
@@ -400,9 +531,143 @@ export default function OutletDashboard() {
                   </div>
                 )}
 
-                {/* ── SHARED: user info + cart ── */}
-                {posUser && (
-                  <>
+                {/* ── QR METHOD: show QR and wait for citizen to scan ── */}
+                {posMainMode === 'tamween' && posMethod === 'qr' && !posUser && (
+                  <div className="space-y-4">
+                    <div className="flex flex-col items-center gap-4 py-2">
+                      <div className="bg-white p-4 rounded-2xl shadow-lg border-4 border-green-600">
+                        {user?.outletId ? (
+                          <QRCodeSVG
+                            value={`http://${window.location.hostname}:5173/qr/${user.outletId}`}
+                            size={210}
+                            bgColor="#ffffff"
+                            fgColor="#166534"
+                            level="H"
+                          />
+                        ) : (
+                          <div className="w-52 h-52 flex items-center justify-center text-gray-400 text-sm">جاري التحميل...</div>
+                        )}
+                      </div>
+                      <div className="text-center space-y-1">
+                        <p className="font-bold text-gray-800">{profile?.name}</p>
+                        <p className="text-xs text-gray-500">{profile?.address}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center space-y-2">
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="animate-pulse text-lg">⏳</span>
+                        <p className="font-bold text-amber-800 text-sm">في انتظار مسح العميل للرمز...</p>
+                      </div>
+                      <p className="text-xs text-amber-600">بمجرد مسح العميل للرمز وتأكيد هويته ستبدأ عملية البيع تلقائياً</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── GUEST METHOD: no auth, direct cart ── */}
+                {posMainMode === 'guest' && (
+                  <div className="space-y-4">
+                    <button onClick={resetPos}
+                      className="flex items-center gap-2 text-sm text-gray-600 font-medium bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-xl transition-colors">
+                      ← رجوع للقائمة الرئيسية
+                    </button>
+                    <div className="bg-orange-50 border border-orange-200 rounded-xl p-2 text-center text-sm text-orange-700 font-medium">
+                      🛒 بيع لغير المسجلين — بدون خصم من رصيد التموين
+                    </div>
+
+                    {/* bank card widget */}
+                    {!posCardPaid ? (
+                      <div className="border-2 border-blue-200 bg-blue-50 rounded-2xl p-4 space-y-3">
+                        <p className="font-bold text-blue-800 text-center text-sm">دفع بالبطاقة البنكية (اختياري)</p>
+                        {!posCardInserted ? (
+                          <div className="flex flex-col items-center gap-3">
+                            <div className="w-44 bg-gradient-to-br from-blue-700 to-blue-500 rounded-2xl shadow-lg flex flex-col justify-between p-4 text-white select-none" style={{height:'6.5rem'}}>
+                              <div className="flex justify-between items-start">
+                                <span className="text-xs opacity-80">بطاقة بنكية</span>
+                                <span className="text-lg">📡</span>
+                              </div>
+                              <div className="w-9 h-6 bg-yellow-300 rounded opacity-90" />
+                              <div className="text-xs tracking-widest opacity-70">**** **** **** ****</div>
+                            </div>
+                            <button onClick={() => setPosCardInserted(true)}
+                              className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-blue-700 text-sm">
+                              إدخال البطاقة البنكية
+                            </button>
+                            <button className="text-sm text-gray-500 underline hover:text-gray-700">
+                              تخطي — سيتم الدفع كاش
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="bg-blue-100 border border-blue-200 rounded-xl p-3 text-center text-sm text-blue-800">
+                              ✅ تمت قراءة البطاقة — أدخل الرمز السري
+                            </div>
+                            <input value={posCardPin} onChange={e => setPosCardPin(e.target.value)}
+                              placeholder="••••••" maxLength={6} type="password"
+                              className="w-full border rounded-xl px-4 py-4 text-center text-2xl tracking-widest font-bold focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            {posCardError && <p className="text-red-600 text-sm text-center">{posCardError}</p>}
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => { setPosCardInserted(false); setPosCardPin(''); setPosCardError('') }}
+                                className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50">
+                                إلغاء
+                              </button>
+                              <button type="button" disabled={posCardLoading}
+                                onClick={async () => {
+                                  if (posCardPin !== '000000') { setPosCardError('رمز البطاقة غير صحيح'); return }
+                                  setPosCardLoading(true)
+                                  await new Promise(r => setTimeout(r, 1200))
+                                  setPosCardPaid(true); setPosCardLoading(false)
+                                }}
+                                className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50">
+                                {posCardLoading ? 'جاري المعالجة...' : 'تأكيد الدفع'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-blue-50 border border-blue-300 rounded-xl p-3 text-center text-blue-800 text-sm font-bold">
+                        ✅ تمت الموافقة على البطاقة البنكية — سيتم الدفع ببطاقة بنكية
+                      </div>
+                    )}
+
+                    <form onSubmit={recordSale} className="space-y-3">
+                      <h3 className="font-medium text-gray-700">اختر المنتجات:</h3>
+                      {posCart.map((item, i) => (
+                        <div key={item.productId} className="flex items-center justify-between border rounded-xl p-3">
+                          <div>
+                            <p className="font-medium text-sm">{item.name}</p>
+                            <p className="text-xs text-gray-400">{item.price} جنيه / {item.unit}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => { const u = [...posCart]; u[i].qty = Math.max(0, u[i].qty - 1); setPosCart(u) }}
+                              className="w-8 h-8 rounded-full border font-bold text-lg flex items-center justify-center">-</button>
+                            <span className="w-8 text-center font-bold">{item.qty}</span>
+                            <button type="button" onClick={() => { const u = [...posCart]; u[i].qty++; setPosCart(u) }}
+                              className="w-8 h-8 rounded-full bg-orange-500 text-white font-bold text-lg flex items-center justify-center">+</button>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="bg-gray-50 rounded-xl p-3 flex justify-between">
+                        <span className="text-gray-600">الإجمالي</span>
+                        <span className="font-bold text-orange-600">{posCart.reduce((s, i) => s + i.price * i.qty, 0).toFixed(2)} جنيه</span>
+                      </div>
+                      {posMsg.startsWith('error:') && (
+                        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 text-center">
+                          {posMsg.replace('error:', '')}
+                        </div>
+                      )}
+                      <button type="submit" disabled={posLoading}
+                        className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold hover:bg-orange-600 disabled:opacity-50">
+                        {posLoading ? 'جاري التسجيل...' : 'تسجيل عملية البيع'}
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                {/* ── SHARED: payment mode selection (tamween users only) ── */}
+                {posMainMode === 'tamween' && posUser && !posPaymentMode && (
+                  <div className="space-y-4">
                     <div className="bg-green-50 border border-green-200 rounded-xl p-4">
                       <div className="flex justify-between">
                         <div>
@@ -415,6 +680,109 @@ export default function OutletDashboard() {
                         </div>
                       </div>
                     </div>
+                    <p className="text-center font-bold text-gray-700 text-base">اختر طريقة الدفع</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button onClick={() => setPosPaymentMode('balance')}
+                        className="p-5 border-2 border-green-600 bg-green-50 rounded-2xl flex flex-col items-center gap-2 hover:bg-green-100 transition-colors">
+                        <span className="text-4xl">💰</span>
+                        <span className="font-bold text-green-800 text-sm">الدفع بالرصيد</span>
+                        <span className="text-xs text-green-600 text-center">خصم من رصيد التموين</span>
+                      </button>
+                      <button onClick={() => setPosPaymentMode('no-balance')}
+                        className="p-5 border-2 border-blue-500 bg-blue-50 rounded-2xl flex flex-col items-center gap-2 hover:bg-blue-100 transition-colors">
+                        <span className="text-4xl">💳</span>
+                        <span className="font-bold text-blue-800 text-sm">الدفع بدون الرصيد</span>
+                        <span className="text-xs text-blue-600 text-center">كاش أو بطاقة بنكية</span>
+                      </button>
+                    </div>
+                    <button onClick={resetPos}
+                      className="w-full border border-gray-300 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50">
+                      إلغاء
+                    </button>
+                  </div>
+                )}
+
+                {/* ── SHARED: user info + optional bank card + cart (tamween users) ── */}
+                {posMainMode === 'tamween' && posUser && posPaymentMode && (
+                  <>
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                      <div className="flex justify-between">
+                        <div>
+                          <p className="font-bold text-green-900">{posUser.name}</p>
+                          <p className="text-sm text-gray-500">بطاقة: {posUser.tamweenCardId}</p>
+                        </div>
+                        <div className="text-left">
+                          <p className="text-xs text-gray-500">الرصيد المتبقي</p>
+                          <p className="font-bold text-green-700 text-xl">{posUser.remainingCredit?.toFixed(2)} جنيه</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-center gap-2">
+                        <span className={`text-xs px-3 py-1 rounded-full font-medium ${posPaymentMode === 'balance' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {posPaymentMode === 'balance' ? '💰 دفع بالرصيد' : '💳 دفع بدون رصيد'}
+                        </span>
+                        <button onClick={() => { setPosPaymentMode(null); setPosCardInserted(false); setPosCardPin(''); setPosCardError(''); setPosCardPaid(false) }}
+                          className="text-xs text-gray-400 underline hover:text-gray-600">تغيير</button>
+                      </div>
+                    </div>
+
+                    {/* bank card widget — only for no-balance mode */}
+                    {posPaymentMode === 'no-balance' && !posCardPaid && (
+                      <div className="border-2 border-blue-200 bg-blue-50 rounded-2xl p-4 space-y-3">
+                        <p className="font-bold text-blue-800 text-center text-sm">دفع بالبطاقة البنكية (اختياري)</p>
+                        {!posCardInserted ? (
+                          <div className="flex flex-col items-center gap-3">
+                            <div className="w-44 h-26 bg-gradient-to-br from-blue-700 to-blue-500 rounded-2xl shadow-lg flex flex-col justify-between p-4 text-white select-none" style={{height:'6.5rem'}}>
+                              <div className="flex justify-between items-start">
+                                <span className="text-xs opacity-80">بطاقة بنكية</span>
+                                <span className="text-lg">📡</span>
+                              </div>
+                              <div className="w-9 h-6 bg-yellow-300 rounded opacity-90" />
+                              <div className="text-xs tracking-widest opacity-70">**** **** **** ****</div>
+                            </div>
+                            <button onClick={() => setPosCardInserted(true)}
+                              className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-blue-700 text-sm">
+                              إدخال البطاقة البنكية
+                            </button>
+                            <button onClick={() => setPosPaymentMode('no-balance')}
+                              className="text-sm text-gray-500 underline hover:text-gray-700">
+                              تخطي — سيتم الدفع كاش
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="bg-blue-100 border border-blue-200 rounded-xl p-3 text-center text-sm text-blue-800">
+                              ✅ تمت قراءة البطاقة — أدخل الرمز السري
+                            </div>
+                            <input value={posCardPin} onChange={e => setPosCardPin(e.target.value)}
+                              placeholder="••••••" maxLength={6} type="password"
+                              className="w-full border rounded-xl px-4 py-4 text-center text-2xl tracking-widest font-bold focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            {posCardError && <p className="text-red-600 text-sm text-center">{posCardError}</p>}
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => { setPosCardInserted(false); setPosCardPin(''); setPosCardError('') }}
+                                className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50">
+                                إلغاء
+                              </button>
+                              <button type="button" disabled={posCardLoading}
+                                onClick={async () => {
+                                  if (posCardPin !== '000000') { setPosCardError('رمز البطاقة غير صحيح'); return }
+                                  setPosCardLoading(true)
+                                  await new Promise(r => setTimeout(r, 1200))
+                                  setPosCardPaid(true); setPosCardLoading(false)
+                                }}
+                                className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50">
+                                {posCardLoading ? 'جاري المعالجة...' : 'تأكيد الدفع'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {posPaymentMode === 'no-balance' && posCardPaid && (
+                      <div className="bg-blue-50 border border-blue-300 rounded-xl p-3 text-center text-blue-800 text-sm font-bold">
+                        ✅ تمت الموافقة على البطاقة البنكية — سيتم الدفع ببطاقة بنكية
+                      </div>
+                    )}
 
                     <form onSubmit={recordSale} className="space-y-3">
                       <h3 className="font-medium text-gray-700">اختر المنتجات:</h3>
@@ -433,25 +801,156 @@ export default function OutletDashboard() {
                           </div>
                         </div>
                       ))}
-                      <div className="bg-gray-50 rounded-xl p-3 flex justify-between">
-                        <span className="text-gray-600">الإجمالي</span>
-                        <span className="font-bold text-green-700">{posCart.reduce((s, i) => s + i.price * i.qty, 0).toFixed(2)} جنيه</span>
-                      </div>
+                      {(() => {
+                        const cartTotal = posCart.reduce((s, i) => s + i.price * i.qty, 0)
+                        const shortfall = posPaymentMode === 'balance' ? Math.max(0, cartTotal - (posUser?.remainingCredit || 0)) : 0
+                        const balanceUsed = posPaymentMode === 'balance' ? Math.min(posUser?.remainingCredit || 0, cartTotal) : cartTotal
+                        return (
+                          <>
+                            <div className="bg-gray-50 rounded-xl p-3 space-y-1">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">الإجمالي</span>
+                                <span className="font-bold text-green-700">{cartTotal.toFixed(2)} جنيه</span>
+                              </div>
+                              {posPaymentMode === 'balance' && shortfall > 0 && (
+                                <>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-green-600">من رصيد التموين</span>
+                                    <span className="font-medium text-green-700">{balanceUsed.toFixed(2)} جنيه</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-amber-600">الفرق المطلوب</span>
+                                    <span className="font-bold text-amber-700">{shortfall.toFixed(2)} جنيه</span>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            {/* shortfall bank card widget */}
+                            {posPaymentMode === 'balance' && shortfall > 0 && (
+                              <div className="border-2 border-amber-300 bg-amber-50 rounded-2xl p-4 space-y-3">
+                                <p className="font-bold text-amber-800 text-center text-sm">
+                                  ⚠️ الرصيد غير كافٍ — الفرق {shortfall.toFixed(2)} جنيه
+                                </p>
+                                {!posCardPaid ? (
+                                  <>
+                                    {!posCardInserted ? (
+                                      <div className="flex flex-col items-center gap-3">
+                                        <div className="w-44 bg-gradient-to-br from-blue-700 to-blue-500 rounded-2xl shadow-lg flex flex-col justify-between p-4 text-white select-none" style={{height:'6.5rem'}}>
+                                          <div className="flex justify-between items-start">
+                                            <span className="text-xs opacity-80">بطاقة بنكية</span>
+                                            <span className="text-lg">📡</span>
+                                          </div>
+                                          <div className="w-9 h-6 bg-yellow-300 rounded opacity-90" />
+                                          <div className="text-xs tracking-widest opacity-70">**** **** **** ****</div>
+                                        </div>
+                                        <button type="button" onClick={() => setPosCardInserted(true)}
+                                          className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-blue-700 text-sm">
+                                          دفع الفرق ببطاقة بنكية
+                                        </button>
+                                        <p className="text-xs text-gray-500 text-center">أو سيتم دفع الفرق كاش عند التأكيد</p>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-3">
+                                        <div className="bg-blue-100 border border-blue-200 rounded-xl p-3 text-center text-sm text-blue-800">
+                                          ✅ تمت قراءة البطاقة — أدخل الرمز السري
+                                        </div>
+                                        <input value={posCardPin} onChange={e => setPosCardPin(e.target.value)}
+                                          placeholder="••••••" maxLength={6} type="password"
+                                          className="w-full border rounded-xl px-4 py-3 text-center text-2xl tracking-widest font-bold focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        {posCardError && <p className="text-red-600 text-sm text-center">{posCardError}</p>}
+                                        <div className="flex gap-2">
+                                          <button type="button" onClick={() => { setPosCardInserted(false); setPosCardPin(''); setPosCardError('') }}
+                                            className="flex-1 border border-gray-300 text-gray-600 py-2 rounded-xl font-medium text-sm">
+                                            إلغاء
+                                          </button>
+                                          <button type="button" disabled={posCardLoading}
+                                            onClick={async () => {
+                                              if (posCardPin !== '000000') { setPosCardError('رمز البطاقة غير صحيح'); return }
+                                              setPosCardLoading(true)
+                                              await new Promise(r => setTimeout(r, 1200))
+                                              setPosCardPaid(true); setPosCardLoading(false)
+                                            }}
+                                            className="flex-1 bg-blue-600 text-white py-2 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 text-sm">
+                                            {posCardLoading ? 'جاري المعالجة...' : 'تأكيد'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div className="bg-blue-50 border border-blue-300 rounded-xl p-3 text-center text-blue-800 text-sm font-bold">
+                                    ✅ الفرق {shortfall.toFixed(2)} جنيه سيُدفع ببطاقة بنكية
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
+
                       {posMsg.startsWith('error:') && (
                         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 text-center">
                           {posMsg.replace('error:', '')}
                         </div>
                       )}
-                      <div className="flex gap-2">
-                        <button type="button" onClick={resetPos}
-                          className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50">
-                          إلغاء
-                        </button>
-                        <button type="submit" disabled={posLoading}
-                          className="flex-1 bg-green-700 text-white py-3 rounded-xl font-bold hover:bg-green-800 disabled:opacity-50">
-                          {posLoading ? 'جاري التسجيل...' : 'تسجيل عملية البيع'}
-                        </button>
-                      </div>
+
+                      {/* OTP & QR methods: confirmation OTP step before submit */}
+                      {(posMethod === 'otp' || posMethod === 'qr') && (() => {
+                        const readyItems = posCart.filter(i => i.qty > 0)
+                        if (!readyItems.length) return null
+                        return (
+                          <div className="border-t pt-3 space-y-3">
+                            {!posConfirmOtpSent ? (
+                              <>
+                                {posConfirmError && <p className="text-red-600 text-sm text-center">{posConfirmError}</p>}
+                                <button type="button" disabled={posConfirmLoading}
+                                  onClick={() => sendPurchaseConfirmOtp(readyItems)}
+                                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50">
+                                  {posConfirmLoading ? 'جاري الإرسال...' : '📨 إرسال رمز تأكيد الشراء للعميل'}
+                                </button>
+                                <p className="text-xs text-gray-400 text-center">سيصل للعميل رسالة بتفاصيل الفاتورة ورمز التأكيد</p>
+                              </>
+                            ) : (
+                              <>
+                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center text-sm text-blue-700">
+                                  ✉️ تم إرسال رمز تأكيد الشراء للعميل — اطلب منه الرمز
+                                </div>
+                                <input value={posConfirmOtp} onChange={e => setPosConfirmOtp(e.target.value)}
+                                  placeholder="رمز تأكيد الشراء" maxLength={6}
+                                  className="w-full border-2 border-blue-300 rounded-xl px-4 py-3 text-center text-2xl tracking-widest font-bold focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                {posConfirmError && <p className="text-red-600 text-sm text-center">{posConfirmError}</p>}
+                                <div className="flex gap-2">
+                                  <button type="button"
+                                    onClick={() => { setPosConfirmOtpSent(false); setPosConfirmOtp(''); setPosConfirmError('') }}
+                                    className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50 text-sm">
+                                    إعادة الإرسال
+                                  </button>
+                                  <button type="submit" disabled={posLoading || !posConfirmOtp.trim()}
+                                    className="flex-1 bg-green-700 text-white py-3 rounded-xl font-bold hover:bg-green-800 disabled:opacity-50">
+                                    {posLoading ? 'جاري التسجيل...' : '✅ تأكيد وإتمام البيع'}
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )
+                      })()}
+
+                      {/* Card method: direct submit */}
+                      {posMethod === 'card' && (
+                        <div className="flex gap-2">
+                          <button type="button" onClick={resetPos}
+                            className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50">
+                            إلغاء
+                          </button>
+                          <button type="submit" disabled={posLoading}
+                            className="flex-1 bg-green-700 text-white py-3 rounded-xl font-bold hover:bg-green-800 disabled:opacity-50">
+                            {posLoading ? 'جاري التسجيل...' : 'تسجيل عملية البيع'}
+                          </button>
+                        </div>
+                      )}
+
                     </form>
                   </>
                 )}
@@ -547,7 +1046,7 @@ export default function OutletDashboard() {
 
                         {/* ── OTP always visible ── */}
                         <div className="flex justify-between items-center">
-                          <p className="text-sm text-gray-600 font-medium">رمز OTP لتأكيد الاستلام</p>
+                          <p className="text-sm text-gray-600 font-medium">رمز OTP لتأكيد التسليم</p>
                           <button onClick={() => updateDeliveryStatus(selectedDelivery.id, 'OUT_FOR_DELIVERY')}
                             className="text-xs text-blue-600 hover:underline">
                             إعادة إرسال OTP
@@ -615,7 +1114,7 @@ export default function OutletDashboard() {
                         {deliveryOtpError && <p className="text-red-600 text-sm text-center">{deliveryOtpError}</p>}
                         <button onClick={() => confirmDeliveryOtp(selectedDelivery.id)} disabled={deliveryActionLoading || !deliveryOtp}
                           className="w-full bg-green-700 text-white py-3 rounded-xl font-bold hover:bg-green-800 disabled:opacity-50">
-                          {deliveryActionLoading ? 'جاري التأكيد...' : `✅ تأكيد الاستلام ${selectedDelivery.extraPayment > 0 ? (visaPaid ? '(بطاقة بنكية)' : '(كاش)') : ''}`}
+                          {deliveryActionLoading ? 'جاري التأكيد...' : `✅ تأكيد التسليم ${selectedDelivery.extraPayment > 0 ? (visaPaid ? '(بطاقة بنكية)' : '(كاش)') : ''}`}
                         </button>
                       </div>
                     )}
@@ -689,14 +1188,26 @@ export default function OutletDashboard() {
             ) : sales.map(s => (
               <div key={s.id} className="bg-white rounded-xl shadow p-4">
                 <div className="flex justify-between items-start mb-2">
-                  <span className={`text-xs px-3 py-1 rounded-full ${
-                    s.type === 'DELIVERY' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                  }`}>
-                    {s.type === 'DELIVERY' ? '🚚 توصيل' : '🏪 حضوري'}
-                  </span>
+                  <div className="flex gap-2 flex-wrap">
+                    <span className={`text-xs px-3 py-1 rounded-full ${
+                      s.type === 'DELIVERY' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {s.type === 'DELIVERY' ? '🚚 توصيل' : '🏪 حضوري'}
+                    </span>
+                    <span className="text-xs px-3 py-1 rounded-full bg-green-50 text-green-700">
+                      {(() => {
+                        const METHOD = { BALANCE: 'رصيد', CASH: 'كاش', CARD: 'بطاقة بنكية' }
+                        const extra = s.extraPaymentMethod && s.extraAmount > 0
+                        if (!extra) return METHOD[s.paymentMethod] || s.paymentMethod
+                        return `${METHOD[s.paymentMethod]} + ${s.extraAmount} جنيه ${METHOD[s.extraPaymentMethod] || s.extraPaymentMethod}`
+                      })()}
+                    </span>
+                  </div>
                   <span className="font-bold text-green-700">{s.totalAmount} جنيه</span>
                 </div>
-                <p className="text-sm font-medium">{s.user?.name} <span className="text-gray-400">({s.user?.tamweenCardId})</span></p>
+                <p className="text-sm font-medium">
+                  {s.user ? <>{s.user.name} <span className="text-gray-400">({s.user.tamweenCardId})</span></> : <span className="text-gray-400">غير مسجل</span>}
+                </p>
                 <p className="text-xs text-gray-400">{new Date(s.createdAt).toLocaleDateString('ar-EG')}</p>
                 <div className="mt-2 space-y-1">
                   {s.items?.map((item, i) => (
@@ -712,61 +1223,33 @@ export default function OutletDashboard() {
         )}
 
         {/* RESTOCKS */}
-        {tab === 'restocks' && (
-          <>
-            <div className="bg-white rounded-2xl shadow p-6">
-              <h2 className="text-lg font-bold text-gray-700 mb-4">إضافة شحنة جديدة</h2>
-              <form onSubmit={submitRestock} className="space-y-3">
-                <input value={restockNote} onChange={e => setRestockNote(e.target.value)}
-                  placeholder="ملاحظة (اختياري)"
-                  className="w-full border rounded-xl px-4 py-3 text-right focus:outline-none focus:ring-2 focus:ring-green-500" />
-                {restockItems.map((item, i) => (
-                  <div key={item.productId} className="flex items-center justify-between border rounded-xl p-3">
-                    <div>
-                      <p className="font-medium text-sm">{item.name}</p>
-                      <p className="text-xs text-gray-400">{item.unit}</p>
-                    </div>
-                    <input type="number" min="0" value={item.qty || ''}
-                      onChange={e => {
-                        const u = [...restockItems]; u[i].qty = Number(e.target.value); setRestockItems(u)
-                      }}
-                      className="w-24 border rounded-lg px-3 py-2 text-center" placeholder="0" />
-                  </div>
-                ))}
-                {restockMsg === 'success' && (
-                  <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-4 py-3 text-center">
-                    ✅ تم تسجيل الشحنة بنجاح
-                  </div>
-                )}
-                {typeof restockMsg === 'string' && restockMsg.startsWith('error:') && (
-                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 text-center">
-                    {restockMsg.replace('error:', '')}
-                  </div>
-                )}
-                <button type="submit" className="w-full bg-green-700 text-white py-3 rounded-xl font-bold hover:bg-green-800">
-                  تسجيل الشحنة
-                </button>
-              </form>
+        {tab === 'messages' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-gray-700">رسائل الوزارة</h2>
+              <button onClick={() => api.get('/outlet/messages').then(r => setOutletMessages(r.data))}
+                className="text-sm text-green-700 hover:underline">تحديث</button>
             </div>
-
-            <h2 className="text-lg font-bold text-gray-700">سجل الشحنات</h2>
-            {restocks.length === 0 ? (
-              <div className="bg-white rounded-2xl shadow p-12 text-center text-gray-400">لا توجد شحنات بعد</div>
-            ) : restocks.map(r => (
-              <div key={r.id} className="bg-white rounded-xl shadow p-4">
-                <div className="flex justify-between mb-1">
-                  <p className="font-medium">{r.note || 'شحنة بدون ملاحظات'}</p>
-                  <p className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleDateString('ar-EG')}</p>
+            {outletMessages.length === 0 ? (
+              <div className="bg-white rounded-2xl shadow p-12 text-center text-gray-400">لا توجد رسائل</div>
+            ) : outletMessages.map(msg => (
+              <div key={msg.id} className={`bg-white rounded-2xl shadow p-4 border-r-4 ${msg.isRead ? 'border-gray-200' : 'border-green-600'}`}>
+                <div className="flex justify-between items-start mb-2">
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${msg.isRead ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'}`}>
+                    {msg.isRead ? 'مقروءة' : '● جديدة'}
+                  </span>
+                  <span className="text-xs text-gray-400">{new Date(msg.createdAt).toLocaleString('ar-EG')}</span>
                 </div>
-                {r.items?.map((item, i) => (
-                  <div key={i} className="text-xs text-gray-500 flex justify-between mt-1">
-                    <span>{item.product}</span>
-                    <span className="text-green-600">+{item.quantity} {item.unit}</span>
-                  </div>
-                ))}
+                <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">{msg.content}</pre>
+                {!msg.isRead && (
+                  <button onClick={() => markRead(msg.id)}
+                    className="mt-3 text-xs text-gray-400 hover:text-gray-600 underline">
+                    تحديد كمقروءة
+                  </button>
+                )}
               </div>
             ))}
-          </>
+          </div>
         )}
 
       </main>

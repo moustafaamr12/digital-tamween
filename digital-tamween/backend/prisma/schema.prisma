@@ -20,6 +20,12 @@ enum PurchaseType {
   DELIVERY
 }
 
+enum PaymentMethod {
+  BALANCE
+  CASH
+  CARD
+}
+
 enum OrderStatus {
   PENDING
   CONFIRMED
@@ -37,6 +43,8 @@ model User {
   tamweenCardId String   @unique
   phone         String?
   address       String?
+  email         String?  @unique
+  needScore     Float    @default(50)
   passwordHash  String
   cardPin       String   @default("0000") @map("cardpin")
   monthlyCredit Float    @default(200)
@@ -55,13 +63,14 @@ model User {
 
 model Message {
   id        String   @id @default(cuid())
-  userId    String   @map("userid")
+  userId    String?  @map("userid")
+  outletId  String?
   content   String
   otp       String?
   isRead    Boolean  @default(false) @map("isread")
   createdAt DateTime @default(now()) @map("createdat")
 
-  user User @relation(fields: [userId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
 
   @@map("messages")
 }
@@ -152,15 +161,18 @@ model OutletProduct {
 // ─── Purchases (عمليات الشراء) ────────────────────────────────────────────────
 
 model Purchase {
-  id          String       @id @default(cuid())
-  userId      String
-  outletId    String
-  type        PurchaseType
-  totalAmount Float
-  status      OrderStatus  @default(CONFIRMED)
-  createdAt   DateTime     @default(now())
+  id            String        @id @default(cuid())
+  userId        String?
+  outletId      String
+  type          PurchaseType
+  totalAmount   Float
+  paymentMethod      PaymentMethod @default(BALANCE)
+  extraPaymentMethod String?
+  extraAmount        Float?
+  status             OrderStatus   @default(CONFIRMED)
+  createdAt          DateTime      @default(now())
 
-  user     User           @relation(fields: [userId], references: [id])
+  user     User?          @relation(fields: [userId], references: [id])
   outlet   Outlet         @relation(fields: [outletId], references: [id])
   items    PurchaseItem[]
   delivery DeliveryOrder?
@@ -208,6 +220,7 @@ model RestockOperation {
   id        String   @id @default(cuid())
   outletId  String
   note      String?
+  status    String   @default("CONFIRMED")
   createdAt DateTime @default(now())
 
   outlet Outlet        @relation(fields: [outletId], references: [id])

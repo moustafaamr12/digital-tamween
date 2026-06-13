@@ -13,8 +13,8 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
-const TABS = ['balance', 'map', 'delivery', 'delivery-status', 'history', 'messages']
-const TAB_LABELS = { balance: 'رصيدي', map: 'المنافذ', delivery: 'طلب توصيل', 'delivery-status': 'حالة طلبات التوصيل', history: 'سجل الشراء', messages: 'رسائلي' }
+const TABS = ['balance', 'map', 'delivery', 'delivery-status', 'qr', 'history', 'messages']
+const TAB_LABELS = { balance: 'رصيدي', map: 'المنافذ', delivery: 'طلب توصيل', 'delivery-status': 'حالة طلبات التوصيل', qr: '📷 شراء QR', history: 'سجل الشراء', messages: 'رسائلي' }
 
 const STATUS_LABELS = { PENDING: 'تم الارسال', CONFIRMED: 'قيد التحضير', OUT_FOR_DELIVERY: 'في الطريق', DELIVERED: 'تم التسليم', CANCELLED: 'ملغي' }
 const STATUS_COLORS = { PENDING: 'bg-yellow-100 text-yellow-700', CONFIRMED: 'bg-blue-100 text-blue-700', OUT_FOR_DELIVERY: 'bg-purple-100 text-purple-700', DELIVERED: 'bg-green-100 text-green-700', CANCELLED: 'bg-red-100 text-red-700' }
@@ -45,13 +45,24 @@ export default function UserDashboard() {
     api.get('/user/deliveries').then(r => setDeliveryOrders(r.data)).catch(() => {})
   }
 
-  useEffect(() => {
+  function loadProfile() {
     api.get('/user/profile').then(r => setProfile(r.data)).catch(() => {})
+  }
+
+  useEffect(() => {
+    loadProfile()
     api.get('/user/outlets').then(r => setOutlets(r.data)).catch(() => {})
     api.get('/user/purchases').then(r => setPurchases(r.data)).catch(() => {})
     api.get('/user/messages').then(r => setMessages(r.data)).catch(() => {})
     loadDeliveryOrders()
   }, [])
+
+  useEffect(() => {
+    if (tab === 'balance') loadProfile()
+    if (tab === 'history') api.get('/user/purchases').then(r => setPurchases(r.data)).catch(() => {})
+    if (tab === 'messages') api.get('/user/messages').then(r => setMessages(r.data)).catch(() => {})
+    if (tab === 'delivery-status') loadDeliveryOrders()
+  }, [tab])
 
   function handleLogout() { logout(); navigate('/login') }
 
@@ -143,6 +154,7 @@ export default function UserDashboard() {
                 ['الرقم القومي', profile?.nationalId],
                 ['الهاتف', profile?.phone],
                 ['العنوان', profile?.address],
+                ...(profile?.email ? [['البريد الإلكتروني', profile.email]] : []),
               ].map(([label, val]) => (
                 <div key={label} className="flex justify-between py-2 border-b last:border-0 text-sm">
                   <span className="text-gray-500">{label}</span>
@@ -373,6 +385,42 @@ export default function UserDashboard() {
           </>
         )}
 
+        {/* QR PURCHASE */}
+        {tab === 'qr' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl shadow p-8 text-center space-y-5">
+              <div className="w-24 h-24 bg-green-700 rounded-2xl flex items-center justify-center text-5xl mx-auto shadow-lg">
+                📷
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-800">شراء عبر QR Code</h2>
+                <p className="text-gray-500 text-sm mt-2 leading-relaxed">
+                  امسح رمز QR الموجود عند منفذ التموين بكاميرا موبايلك وأتم شراءك مباشرةً بدون الحاجة لموظف المنفذ
+                </p>
+              </div>
+              <button onClick={() => navigate('/scan')}
+                className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-4 rounded-2xl text-lg transition-all shadow-md">
+                افتح الكاميرا وامسح QR
+              </button>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow p-5 space-y-3">
+              <h3 className="font-bold text-gray-700">كيف يعمل؟</h3>
+              {[
+                { icon: '1️⃣', text: 'اضغط على "افتح الكاميرا وامسح QR" أعلاه' },
+                { icon: '2️⃣', text: 'امسح الـ QR' },
+                { icon: '3️⃣', text: 'اطلب ما تريده من التاجر وطريقة التحصيل' },
+                { icon: '4️⃣', text: 'أعطِ التاجر كلمة السر للمرة الواحدة الموجودة في رسائلك للتأكيد' },
+              ].map(s => (
+                <div key={s.icon} className="flex items-start gap-3">
+                  <span className="text-xl shrink-0">{s.icon}</span>
+                  <p className="text-sm text-gray-600 pt-0.5">{s.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* HISTORY */}
         {tab === 'history' && (
           <>
@@ -381,12 +429,22 @@ export default function UserDashboard() {
               <div className="bg-white rounded-2xl shadow p-12 text-center text-gray-400">لا توجد مشتريات بعد</div>
             ) : purchases.map(p => (
               <div key={p.id} className="bg-white rounded-xl shadow p-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className={`text-xs px-3 py-1 rounded-full font-medium ${
-                    p.type === 'DELIVERY' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                  }`}>
-                    {p.type === 'DELIVERY' ? '🚚 توصيل' : '🏪 حضوري'}
-                  </span>
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex gap-2 flex-wrap">
+                    <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                      p.type === 'DELIVERY' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {p.type === 'DELIVERY' ? '🚚 توصيل' : '🏪 حضوري'}
+                    </span>
+                    <span className="text-xs px-3 py-1 rounded-full bg-green-50 text-green-700 font-medium">
+                      {(() => {
+                        const METHOD = { BALANCE: 'رصيد', CASH: 'كاش', CARD: 'بطاقة بنكية' }
+                        const extra = p.extraPaymentMethod && p.extraAmount > 0
+                        if (!extra) return METHOD[p.paymentMethod] || p.paymentMethod
+                        return `${METHOD[p.paymentMethod]} + ${p.extraAmount} جنيه ${METHOD[p.extraPaymentMethod] || p.extraPaymentMethod}`
+                      })()}
+                    </span>
+                  </div>
                   <span className="font-bold text-green-700">{p.totalAmount} جنيه</span>
                 </div>
                 <p className="text-sm font-medium">{p.outlet?.name}</p>

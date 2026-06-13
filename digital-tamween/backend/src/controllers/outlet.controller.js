@@ -49,6 +49,7 @@ export async function getSalesHistory(req, res) {
     total, page: parseInt(page),
     data: sales.map((s) => ({
       id: s.id, type: s.type, status: s.status, totalAmount: s.totalAmount, createdAt: s.createdAt,
+      paymentMethod: s.paymentMethod, extraPaymentMethod: s.extraPaymentMethod, extraAmount: s.extraAmount,
       user: s.user,
       items: s.items.map((i) => ({ product: i.product.name, unit: i.product.unit, quantity: i.quantity, unitPrice: i.unitPrice })),
       delivery: s.delivery,
@@ -194,3 +195,22 @@ export async function addRestock(req, res) {
 
   res.status(201).json(restock)
 }
+
+// ─── Outlet Messages ──────────────────────────────────────────────────────────
+
+export async function getOutletMessages(req, res) {
+  const { outletId } = req.user
+  const messages = await prisma.message.findMany({
+    where: { outletId },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  })
+  res.json(messages)
+}
+
+export async function markMessageRead(req, res) {
+  const { id } = req.params
+  await prisma.message.update({ where: { id }, data: { isRead: true } })
+  res.json({ ok: true })
+}
+

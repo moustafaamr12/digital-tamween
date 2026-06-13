@@ -3,7 +3,7 @@ import prisma from '../lib/prisma.js'
 export async function getProfile(req, res) {
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
-    select: { id: true, name: true, nationalId: true, tamweenCardId: true, phone: true, address: true, monthlyCredit: true, usedCredit: true },
+    select: { id: true, name: true, nationalId: true, tamweenCardId: true, phone: true, address: true, email: true, monthlyCredit: true, usedCredit: true },
   })
   if (!user) return res.status(404).json({ error: 'User not found' })
   res.json({ ...user, remainingCredit: user.monthlyCredit - user.usedCredit })
@@ -75,6 +75,7 @@ export async function getPurchaseHistory(req, res) {
   })
   res.json(purchases.map((p) => ({
     id: p.id, type: p.type, status: p.status, totalAmount: p.totalAmount, createdAt: p.createdAt,
+    paymentMethod: p.paymentMethod, extraPaymentMethod: p.extraPaymentMethod, extraAmount: p.extraAmount,
     outlet: p.outlet,
     items: p.items.map((i) => ({ product: i.product.name, unit: i.product.unit, quantity: i.quantity, unitPrice: i.unitPrice })),
     delivery: p.delivery ? { address: p.delivery.address, status: p.delivery.status, deliveryFee: p.delivery.deliveryFee } : null,
