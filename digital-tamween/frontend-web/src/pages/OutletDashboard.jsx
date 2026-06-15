@@ -78,6 +78,11 @@ export default function OutletDashboard() {
   const [visaLoading, setVisaLoading] = useState(false)
 
   useEffect(() => {
+    if (tab === 'messages') api.get('/outlet/messages').then(r => setOutletMessages(r.data || [])).catch(() => {})
+    if (tab === 'inventory') loadInventory()
+  }, [tab])
+
+  useEffect(() => {
     loadAll()
 
     const socket = io('http://localhost:3000')
@@ -166,6 +171,12 @@ export default function OutletDashboard() {
   async function markRead(id) {
     await api.patch(`/outlet/messages/${id}/read`)
     setOutletMessages(prev => prev.map(m => m.id === id ? { ...m, isRead: true } : m))
+  }
+
+  async function markAllRead() {
+    const unread = outletMessages.filter(m => !m.isRead)
+    await Promise.all(unread.map(m => api.patch(`/outlet/messages/${m.id}/read`)))
+    setOutletMessages(prev => prev.map(m => ({ ...m, isRead: true })))
   }
 
   function resetPos() {
@@ -1227,8 +1238,14 @@ export default function OutletDashboard() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-gray-700">رسائل الوزارة</h2>
-              <button onClick={() => api.get('/outlet/messages').then(r => setOutletMessages(r.data))}
-                className="text-sm text-green-700 hover:underline">تحديث</button>
+              <div className="flex items-center gap-4">
+                {outletMessages.some(m => !m.isRead) && (
+                  <button onClick={markAllRead}
+                    className="text-sm text-green-700 hover:underline">تحديد الكل كمقروءة</button>
+                )}
+                <button onClick={() => api.get('/outlet/messages').then(r => setOutletMessages(r.data))}
+                  className="text-sm text-gray-400 hover:underline">تحديث</button>
+              </div>
             </div>
             {outletMessages.length === 0 ? (
               <div className="bg-white rounded-2xl shadow p-12 text-center text-gray-400">لا توجد رسائل</div>

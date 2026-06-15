@@ -1,0 +1,166 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Regions (المناطق الجغرافية) ──────────────────────────────────────────────
+
+model Region {
+  id          String   @id @default(cuid())
+  name        String
+  governorate String
+  type        String   @default("urban")
+  latitude    Float
+  longitude   Float
+  population  Int
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  populationStats   PopulationStats[]
+  agriculturalData  AgriculturalData[]
+  tamweenSync       TamweenSync[]
+  deprivationScores DeprivationScore[]
+  convoyMissions    ConvoyMission[]
+  alerts            Alert[]
+
+  @@map("regions")
+}
+
+// ─── Population Stats (إحصاءات السكان) ────────────────────────────────────────
+
+model PopulationStats {
+  id               String   @id @default(cuid())
+  regionId         String   @map("region_id")
+  avgMonthlyIncome Float    @map("avg_monthly_income")
+  povertyRate      Float    @map("poverty_rate")
+  foodStoreCount   Int      @map("food_store_count")
+  year             Int
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  region Region @relation(fields: [regionId], references: [id])
+
+  @@map("population_stats")
+}
+
+// ─── Agricultural Data (البيانات الزراعية) ────────────────────────────────────
+
+model AgriculturalData {
+  id             String   @id @default(cuid())
+  regionId       String   @map("region_id")
+  cropName       String   @map("crop_name")
+  productionTons Float    @map("production_tons")
+  consumptionEst Float    @map("consumption_est")
+  localPrice     Float    @map("local_price")
+  season         String
+  recordedAt     DateTime @default(now()) @map("recorded_at")
+
+  region Region @relation(fields: [regionId], references: [id])
+
+  @@map("agricultural_data")
+}
+
+// ─── Tamween Sync (بيانات مزامنة التموين) ────────────────────────────────────
+
+model TamweenSync {
+  id                 String   @id @default(cuid())
+  regionId           String   @map("region_id")
+  outletCount        Int      @map("outlet_count")
+  avgInventoryLevel  Float    @map("avg_inventory_level")
+  monthlySalesVolume Float    @map("monthly_sales_volume")
+  syncedAt           DateTime @default(now()) @map("synced_at")
+
+  region Region @relation(fields: [regionId], references: [id])
+
+  @@map("tamween_sync")
+}
+
+// ─── Deprivation Scores (درجات الحرمان) ───────────────────────────────────────
+
+model DeprivationScore {
+  id            String   @id @default(cuid())
+  regionId      String   @map("region_id")
+  outletScore   Float    @map("outlet_score")
+  incomeScore   Float    @map("income_score")
+  cropScore     Float    @map("crop_score")
+  storeScore    Float    @map("store_score")
+  distanceScore Float    @map("distance_score")
+  totalScore    Float    @map("total_score")
+  priorityTier  String   @map("priority_tier")
+  calculatedAt  DateTime @default(now()) @map("calculated_at")
+
+  region Region @relation(fields: [regionId], references: [id])
+
+  @@map("deprivation_scores")
+}
+
+// ─── Convoys (القوافل) ────────────────────────────────────────────────────────
+
+model Convoy {
+  id           String   @id @default(cuid())
+  name         String
+  entity       String
+  capacityTons Float    @map("capacity_tons")
+  currentLat   Float?   @map("current_lat")
+  currentLng   Float?   @map("current_lng")
+  status       String   @default("AVAILABLE")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  missions ConvoyMission[]
+  alerts   Alert[]
+
+  @@map("convoys")
+}
+
+// ─── Convoy Missions (مهام القوافل) ───────────────────────────────────────────
+
+model ConvoyMission {
+  id                   String    @id @default(cuid())
+  convoyId             String    @map("convoy_id")
+  regionId             String    @map("region_id")
+  itemsDistributedTons Float?    @map("items_distributed_tons")
+  missionStatus        String    @default("PLANNED") @map("mission_status")
+  dispatchedAt         DateTime? @map("dispatched_at")
+  completedAt          DateTime? @map("completed_at")
+
+  convoy Convoy  @relation(fields: [convoyId], references: [id])
+  region Region  @relation(fields: [regionId], references: [id])
+  alerts Alert[]
+
+  @@map("convoy_missions")
+}
+
+// ─── Alerts (التنبيهات) ────────────────────────────────────────────────────────
+
+model Alert {
+  id             String    @id @default(cuid())
+  regionId       String    @map("region_id")
+  convoyId       String?   @map("convoy_id")
+  missionId      String?   @map("mission_id")
+  alertType      String    @map("alert_type")
+  message        String
+  status         String    @default("PENDING")
+  sentAt         DateTime  @default(now()) @map("sent_at")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+
+  region  Region         @relation(fields: [regionId], references: [id])
+  convoy  Convoy?        @relation(fields: [convoyId], references: [id])
+  mission ConvoyMission? @relation(fields: [missionId], references: [id])
+
+  @@map("alerts")
+}
+
+// ─── Pipeline Runs (سجل Airflow) ──────────────────────────────────────────────
+
+model PipelineRun {
+  id               String    @id @default(cuid())
+  dagName          String    @map("dag_name")
+  status           String
+  regionsProcessed Int       @default(0) @map("regions_processed")
+  startedAt        DateTime  @default(now()) @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+
+  @@map("pipeline_runs")
+}

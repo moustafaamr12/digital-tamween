@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import tamween from '../api/tamween'
@@ -50,6 +50,9 @@ export default function GovDashboard() {
 
   // ── Restock State ───────────────────────────────────────────────────────────
   const [restockOutletId, setRestockOutletId] = useState('')
+  const [outletSearch, setOutletSearch] = useState('')
+  const [outletDropOpen, setOutletDropOpen] = useState(false)
+  const outletDropRef = useRef(null)
   const [restockQtys, setRestockQtys] = useState({})
   const [restockNote, setRestockNote] = useState('')
   const [restockLoading, setRestockLoading] = useState(false)
@@ -65,7 +68,6 @@ export default function GovDashboard() {
   const [stats, setStats] = useState(null)
   const [outlets, setOutlets] = useState([])
   const [users, setUsers] = useState([])
-  const [outletSearch, setOutletSearch] = useState('')
   const [userSearch, setUserSearch] = useState('')
   const [selectedOutlet, setSelectedOutlet] = useState(null)
   const [outletSales, setOutletSales] = useState([])
@@ -86,6 +88,13 @@ export default function GovDashboard() {
     if (module === 'tamween') { loadStats(); loadOutlets(); loadUsers() }
     if (module === 'regions') { loadRegions(); loadFsStats() }
   }, [module])
+
+  useEffect(() => {
+    if (!outletDropOpen) return
+    const handler = e => { if (outletDropRef.current && !outletDropRef.current.contains(e.target)) setOutletDropOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [outletDropOpen])
 
   useEffect(() => {
     if (!restockOutletId) { setRestockProducts([]); setRestockQtys({}); return }
@@ -268,19 +277,67 @@ export default function GovDashboard() {
           <main className="max-w-5xl mx-auto p-4 space-y-4">
 
             {/* STATS */}
-            {tamweenTab === 'stats' && (
-              <>
-                <div className="grid grid-cols-2 gap-4">
-                  {statCards.map(c => (
-                    <div key={c.label} className={`${c.color} text-white rounded-2xl shadow p-5`}>
-                      <p className="text-3xl font-bold">{c.value}</p>
-                      <p className="font-medium mt-1">{c.label}</p>
-                      <p className="text-sm opacity-75">{c.sub}</p>
-                    </div>
-                  ))}
+            {tamweenTab === 'stats' && stats && (
+              <div className="space-y-4">
+
+                {/* ── Row 1: Main KPIs ── */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-navy-800 text-white rounded-2xl shadow p-5 col-span-2">
+                    <p className="text-4xl font-bold">{stats.totalUsers}</p>
+                    <p className="font-semibold mt-1 text-lg">إجمالي المستفيدين</p>
+                  </div>
+                  <div className="bg-navy-700 text-white rounded-2xl shadow p-5">
+                    <p className="text-3xl font-bold">{stats.totalOutlets}</p>
+                    <p className="font-medium mt-1">المنافذ</p>
+                    <p className="text-sm opacity-70">{stats.activeOutlets} نشط</p>
+                  </div>
+                  <div className="bg-gold-600 text-white rounded-2xl shadow p-5">
+                    <p className="text-3xl font-bold">{stats.totalPurchases}</p>
+                    <p className="font-medium mt-1">عمليات البيع</p>
+                  </div>
                 </div>
+
+                {/* ── Row 2: Revenue ── */}
+                <div className="bg-white rounded-2xl shadow p-5 border-r-4 border-gold-500">
+                  <p className="text-xs text-gray-400 mb-1">إجمالي الإيرادات</p>
+                  <p className="text-3xl font-bold text-gold-600">{(stats.totalRevenue || 0).toFixed(0)} جنيه</p>
+                </div>
+
+                {/* ── Row 3: Need Score ── */}
                 <div className="bg-white rounded-2xl shadow p-5">
-                  <h2 className="font-bold text-gray-700 mb-3">⚠️ تنبيهات المخزون المنخفض</h2>
+                  <h3 className="font-bold text-gray-700 mb-4">مؤشر الاحتياج الاجتماعي</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm text-gray-500">متوسط مؤشر الاحتياج</span>
+                    <span className={`text-sm font-bold px-3 py-1 rounded-full ${
+                      (stats.avgNeedScore ?? 0) >= 60 ? 'bg-orange-100 text-orange-800' : 'bg-yellow-100 text-yellow-800'
+                    }`}>{stats.avgNeedScore ?? 0}%</span>
+                  </div>
+                  <div className="bg-gray-100 rounded-full h-3 mb-4">
+                    <div className="bg-gradient-to-l from-red-500 via-orange-400 to-yellow-400 h-3 rounded-full"
+                      style={{ width: `${stats.avgNeedScore ?? 0}%` }} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div className="bg-red-50 rounded-xl p-3">
+                      <p className="text-2xl font-bold text-red-700">{stats.criticalNeed ?? 0}</p>
+                      <p className="text-xs text-red-600 mt-0.5">فقر مدقع</p>
+                      <p className="text-xs text-gray-400">80% فأكثر</p>
+                    </div>
+                    <div className="bg-orange-50 rounded-xl p-3">
+                      <p className="text-2xl font-bold text-orange-600">{stats.highNeed ?? 0}</p>
+                      <p className="text-xs text-orange-600 mt-0.5">احتياج مرتفع</p>
+                      <p className="text-xs text-gray-400">60 إلى 80%</p>
+                    </div>
+                    <div className="bg-red-50 rounded-xl p-3">
+                      <p className="text-2xl font-bold text-red-600">{stats.exhaustedQuota ?? 0}</p>
+                      <p className="text-xs text-red-600 mt-0.5">استنفذوا الحصة</p>
+                      <p className="text-xs text-gray-400">80% رصيد فأكثر</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Row 4: Low Stock Alerts ── */}
+                <div className="bg-white rounded-2xl shadow p-5">
+                  <h3 className="font-bold text-gray-700 mb-3">⚠️ تنبيهات المخزون المنخفض</h3>
                   {outlets.filter(o => o.products?.some(p => p.lowStock)).length === 0 ? (
                     <p className="text-gray-400 text-sm text-center py-4">لا توجد تنبيهات حالياً ✅</p>
                   ) : outlets.filter(o => o.products?.some(p => p.lowStock)).map(o => (
@@ -292,7 +349,7 @@ export default function GovDashboard() {
                     </div>
                   ))}
                 </div>
-              </>
+              </div>
             )}
 
             {/* OUTLETS */}
@@ -501,9 +558,12 @@ export default function GovDashboard() {
                             </div>
                           </div>
                         </div>
-                        <div className="bg-gray-100 rounded-full h-1.5">
-                          <div className={`h-1.5 rounded-full ${(u.usedCredit / u.monthlyCredit) > 0.8 ? 'bg-red-500' : 'bg-navy-600'}`}
-                            style={{ width: `${Math.min(100, (u.usedCredit / u.monthlyCredit) * 100)}%` }} />
+                        <div className="mt-2">
+                          <p className="text-xs text-gray-400 mb-1">مستوى استنفاذ الحصة التموينية</p>
+                          <div className="bg-gray-100 rounded-full h-1.5">
+                            <div className={`h-1.5 rounded-full ${(u.usedCredit / u.monthlyCredit) > 0.8 ? 'bg-red-500' : 'bg-navy-600'}`}
+                              style={{ width: `${Math.min(100, (u.usedCredit / u.monthlyCredit) * 100)}%` }} />
+                          </div>
                         </div>
                       </div>
                     )
@@ -517,15 +577,38 @@ export default function GovDashboard() {
                 {!pendingRestock && (
                   <div className="bg-white rounded-2xl shadow p-6 space-y-5">
 
-                    <div>
+                    <div className="relative" ref={outletDropRef}>
                       <label className="block text-sm font-medium text-gray-700 mb-1">اختر المنفذ</label>
-                      <select value={restockOutletId} onChange={e => setRestockOutletId(e.target.value)}
-                        className="w-full border rounded-xl px-4 py-3 text-right focus:outline-none focus:ring-2 focus:ring-green-600 bg-white">
-                        <option value="">-- اختر المنفذ --</option>
-                        {outlets.map(o => (
-                          <option key={o.id} value={o.id}>{o.name} — {o.address}</option>
-                        ))}
-                      </select>
+                      <button type="button" onClick={() => setOutletDropOpen(v => !v)}
+                        className="w-full border rounded-xl px-4 py-3 text-right flex justify-between items-center bg-white focus:outline-none focus:ring-2 focus:ring-green-600">
+                        <span className={restockOutletId ? 'text-gray-800' : 'text-gray-400'}>
+                          {restockOutletId ? outlets.find(o => o.id === restockOutletId)?.name ?? '-- اختر المنفذ --' : '-- اختر المنفذ --'}
+                        </span>
+                        <span className="text-gray-400 text-xs">▼</span>
+                      </button>
+                      {outletDropOpen && (
+                        <div className="absolute z-50 mt-1 w-full bg-white border rounded-xl shadow-lg overflow-hidden">
+                          <div className="p-2 border-b">
+                            <input autoFocus value={outletSearch} onChange={e => setOutletSearch(e.target.value)}
+                              placeholder="ابحث باسم المنفذ أو العنوان..."
+                              className="w-full border rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:ring-2 focus:ring-green-500" />
+                          </div>
+                          <ul className="max-h-64 overflow-y-auto">
+                            {outlets.filter(o =>
+                              !outletSearch || o.name.includes(outletSearch) || o.address?.includes(outletSearch)
+                            ).map(o => (
+                              <li key={o.id}
+                                onClick={() => { setRestockOutletId(o.id); setOutletDropOpen(false); setOutletSearch('') }}
+                                className={`px-4 py-3 text-sm cursor-pointer hover:bg-green-50 text-right border-b last:border-0 ${restockOutletId === o.id ? 'bg-green-50 font-bold text-green-700' : 'text-gray-700'}`}>
+                                {o.name} — {o.address}
+                              </li>
+                            ))}
+                            {outlets.filter(o => !outletSearch || o.name.includes(outletSearch) || o.address?.includes(outletSearch)).length === 0 && (
+                              <li className="px-4 py-4 text-sm text-gray-400 text-center">لا توجد نتائج</li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
                     </div>
 
                     {restockProducts.length > 0 && (
@@ -639,6 +722,22 @@ export default function GovDashboard() {
             </div>
           )}
 
+          {/* Weights Legend */}
+          <div className="bg-white rounded-2xl shadow p-4">
+            <p className="text-xs font-bold text-gray-600 mb-3">معايير حساب درجة الحرمان</p>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {METRICS.map(m => (
+                <div key={m.key} className="bg-navy-50 rounded-lg p-2 text-center border border-navy-100">
+                  <p className="text-lg font-bold text-navy-800">{m.weight}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{m.label}</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-3 text-center">
+              درجة الحرمان = مجموع الأوزان المرجّحة لكل معيار (0–100) · تُحسب بدون معيار استنزاف الرصيد (غير عادل)
+            </p>
+          </div>
+
           <div className="bg-white rounded-2xl shadow p-5">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <div>
@@ -748,21 +847,6 @@ export default function GovDashboard() {
             )}
           </div>
 
-          {/* Weights Legend */}
-          <div className="bg-white rounded-2xl shadow p-4">
-            <p className="text-xs font-bold text-gray-600 mb-3">معايير حساب درجة الحرمان</p>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              {METRICS.map(m => (
-                <div key={m.key} className="bg-navy-50 rounded-lg p-2 text-center border border-navy-100">
-                  <p className="text-lg font-bold text-navy-800">{m.weight}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{m.label}</p>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-gray-400 mt-3 text-center">
-              درجة الحرمان = مجموع الأوزان المرجّحة لكل معيار (0–100) · تُحسب بدون معيار استنزاف الرصيد (غير عادل)
-            </p>
-          </div>
         </main>
       )}
 

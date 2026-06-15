@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { authenticate, requireRole } from '../middleware/auth.js'
-import { getOutletProfile, getInventory, getSalesHistory, getRestockHistory, addRestock, getDeliveryOrders, updateDeliveryStatus, confirmDelivery } from '../controllers/outlet.controller.js'
+import { getOutletProfile, getInventory, getSalesHistory, getRestockHistory, addRestock, getDeliveryOrders, updateDeliveryStatus, confirmDelivery, getOutletMessages, markMessageRead } from '../controllers/outlet.controller.js'
 
 const router = Router()
 router.use(authenticate, requireRole('OUTLET_OWNER'))
@@ -13,5 +13,7 @@ router.post('/restocks',            addRestock)
 router.get('/deliveries',           getDeliveryOrders)
 router.patch('/deliveries/:id',     updateDeliveryStatus)
 router.post('/deliveries/:id/confirm', confirmDelivery)
+router.get('/messages',             getOutletMessages)
+router.patch('/messages/:id/read',  markMessageRead)
 
 export default router

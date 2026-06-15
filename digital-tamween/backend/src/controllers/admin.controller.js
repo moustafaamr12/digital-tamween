@@ -7,14 +7,36 @@ function genRestockId() { return `RST-${String(restockSeq++).padStart(4, '0')}` 
 function genOtp() { return String(Math.floor(100000 + Math.random() * 900000)) }
 
 export async function getStats(req, res) {
-  const [totalOutlets, activeOutlets, totalUsers, totalPurchases, totalRevenue] = await Promise.all([
+  const [
+    totalOutlets, activeOutlets, totalUsers, totalPurchases, totalRevenue,
+    totalDeliveries, activeCitizens, needScoreAgg, creditAgg,
+    criticalNeed, highNeed, exhaustedQuota,
+  ] = await Promise.all([
     prisma.outlet.count(),
     prisma.outlet.count({ where: { isActive: true } }),
     prisma.user.count(),
     prisma.purchase.count(),
     prisma.purchase.aggregate({ _sum: { totalAmount: true } }),
+    prisma.deliveryOrder.count(),
+    prisma.user.count({ where: { purchases: { some: {} } } }),
+    prisma.user.aggregate({ _avg: { needScore: true } }),
+    prisma.user.aggregate({ _avg: { usedCredit: true }, _sum: { usedCredit: true } }),
+    prisma.user.count({ where: { needScore: { gte: 80 } } }),
+    prisma.user.count({ where: { needScore: { gte: 60, lt: 80 } } }),
+    prisma.user.count({ where: { usedCredit: { gte: 160 } } }), // >= 80% of 200
   ])
-  res.json({ totalOutlets, activeOutlets, totalUsers, totalPurchases, totalRevenue: totalRevenue._sum.totalAmount ?? 0 })
+  res.json({
+    totalOutlets, activeOutlets, totalUsers, totalPurchases,
+    totalRevenue: totalRevenue._sum.totalAmount ?? 0,
+    totalDeliveries,
+    activeCitizens,
+    avgNeedScore: Number((needScoreAgg._avg.needScore ?? 0).toFixed(1)),
+    avgCreditUsed: Number((creditAgg._avg.usedCredit ?? 0).toFixed(1)),
+    totalCreditUsed: Number((creditAgg._sum.usedCredit ?? 0).toFixed(0)),
+    criticalNeed,
+    highNeed,
+    exhaustedQuota,
+  })
 }
 
 export async function getAllOutlets(req, res) {
