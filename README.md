@@ -110,51 +110,92 @@ TEAM/
 
 ---
 
-## Getting Started
+## Running the Project
 
-### Prerequisites
-- Docker Desktop
-- Node.js >= 20
-- npm
+> Open **4 separate terminal windows** and run each step in its own terminal.  
+> Prerequisites: **Docker Desktop must be open and running** before anything else.
 
-### 1. Start Docker Services
+---
+
+### Terminal 1 — Docker Services (PostgreSQL, Redis, pgAdmin, Airflow, Spark)
+
 ```bash
-cd digital-tamween
+cd C:\Users\Admin\Desktop\TEAM\digital-tamween
 docker-compose up -d
 ```
 
-This starts: PostgreSQL (5433), Redis, pgAdmin (5050), Apache Airflow (8085), Apache Spark (9090)
-
-### 2. Start Backend API
+Wait ~30 seconds for all containers to start, then verify:
 ```bash
-cd digital-tamween/backend
-npm install
+docker ps
+```
+You should see: `tamween_postgres`, `tamween_redis`, `tamween_pgadmin`, `tamween_airflow`, `tamween_spark`
+
+---
+
+### Terminal 2 — Backend API
+
+```bash
+cd C:\Users\Admin\Desktop\TEAM\digital-tamween\backend
 npm run dev
-# Running on http://localhost:3000
 ```
 
-### 3. Start Tamween Web Portal
+Running on → http://localhost:3000
+
+---
+
+### Terminal 3 — Tamween Web Portal (Citizen & Outlet)
+
 ```bash
-cd digital-tamween/frontend-web
-npm install
+cd C:\Users\Admin\Desktop\TEAM\digital-tamween\frontend-web
 npm run dev
-# Running on http://localhost:5173
 ```
 
-### 4. Start Government Portal
+Running on → http://localhost:5173
+
+---
+
+### Terminal 4 — Government Portal
+
 ```bash
-cd gov-portal/frontend-web
-npm install
+cd C:\Users\Admin\Desktop\TEAM\gov-portal\frontend-web
 npm run dev
-# Running on http://localhost:5174
 ```
 
-### 5. Start Mobile App
+Running on → http://localhost:5174
+
+---
+
+### Terminal 5 (Optional) — Mobile App
+
 ```bash
-cd digital-tamween/mobile-app
-npm install
+cd C:\Users\Admin\Desktop\TEAM\digital-tamween\mobile-app
 npx expo start
 ```
+
+Scan the QR code with Expo Go app on your phone.
+
+---
+
+### All URLs After Startup
+
+| Service | URL |
+|---|---|
+| Tamween Web (Citizen / Outlet) | http://localhost:5173 |
+| Government Portal | http://localhost:5174 |
+| Backend API | http://localhost:3000 |
+| pgAdmin | http://localhost:5050 |
+| Apache Airflow | http://localhost:8085 |
+| Apache Spark UI | http://localhost:9090 |
+
+---
+
+### If Port 3000 is Already in Use
+
+```bash
+npx kill-port 3000
+```
+
+Then re-run Terminal 2.
 
 ---
 
