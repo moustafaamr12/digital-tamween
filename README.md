@@ -173,21 +173,43 @@ npx expo start
 
 ## Test Accounts
 
-**Admin** (password: `admin123`)
-- `admin@tamween.gov.eg`
+### Admin Accounts (password: `admin123`)
 
-**Outlet Operators** (password: `owner123`)
-- `outlet1@tamween.gov.eg` through `outlet5@tamween.gov.eg`
-
-**Citizens** — login with National ID (password: `user123`)
-
-| Name | National ID |
+| Email | Role |
 |---|---|
-| Ali Hassan Mohamed | 29901011234567 |
-| Fatima Ahmed Ali | 30005152345678 |
-| Mohamed Saeed Ibrahim | 28807203456789 |
-| Nora Saeed Omar | 30003102345670 |
-| Karim Tarek Hassan | 29506075678901 |
+| admin@tamween.gov.eg | Ministry Official |
+| admin2@tamween.gov.eg | Ministry Official |
+| admin3@tamween.gov.eg | Ministry Official |
+| admin4@tamween.gov.eg | Ministry Official |
+
+### Outlet Operators (password: `owner123`)
+
+| Email | Outlet |
+|---|---|
+| outlet1@tamween.gov.eg | Outlet 1 |
+| outlet2@tamween.gov.eg | Outlet 2 |
+| outlet3@tamween.gov.eg | Outlet 3 |
+| outlet4@tamween.gov.eg | Outlet 4 |
+| outlet5@tamween.gov.eg | Outlet 5 |
+| outlet6@tamween.gov.eg | Outlet 6 |
+| outlet7@tamween.gov.eg | Outlet 7 |
+| outlet8@tamween.gov.eg | Outlet 8 |
+
+### Citizens — login with National ID (password: `user123`)
+
+> **Bank Card PIN for all citizens: `000000`**
+
+| Name | National ID | Ration Card PIN |
+|---|---|---|
+| Ali Hassan Mohamed | 29901011234567 | 1234 |
+| Fatima Ahmed Ali | 30005152345678 | 5678 |
+| Mohamed Saeed Ibrahim | 28807203456789 | 9021 |
+| Nora Saeed Omar | 30003102345670 | 2345 |
+| Karim Tarek Hassan | 29506075678901 | 6789 |
+| Hoda Reda Mohamed | 29811209012345 | 3456 |
+| Omar Khaled Abdullah | 30108123456781 | 7890 |
+| Sara Mostafa Ahmed | 29702285432109 | 4321 |
+| Yousef Essam Ali | 30205176789012 | 8765 |
 
 ---
 
