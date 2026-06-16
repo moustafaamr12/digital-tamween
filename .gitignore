@@ -1,10 +1,12 @@
 .aider*
 .vscode/
+.claude/
 node_modules/
 *.env
 bifrost.json
 REPORT_CONTENT.md
 POSTER_CONTENT.md
+PRESENTATION_CONTENT.md
 *.log
 __pycache__/
 digital-tamween/backend/backend.log
@@ -13,3 +15,5 @@ digital-tamween/big-data/logs/
 digital-tamween/big-data/dags/__pycache__/
 digital-tamween/big-data/plugins/
 food-security/backend/generated/
+package.json
+package-lock.json
